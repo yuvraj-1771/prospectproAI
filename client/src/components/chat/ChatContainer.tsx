@@ -12,6 +12,7 @@ interface Message {
   content: string;
   sender: 'ai' | 'user';
   structuredData?: StructuredData;
+  onFilterApply?: (query: string) => Promise<void>;
 }
 
 interface ChatContainerProps {
@@ -54,7 +55,11 @@ const ChatContainer: React.FC<ChatContainerProps> = ({ messages, isLoading }) =>
       ) : (
         <>
           {messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
+            <ChatMessage 
+              key={message.id} 
+              message={message} 
+              onFilterApply={message.onFilterApply || (async () => {})} 
+            />
           ))}
           {isLoading && (
             <div className="flex items-center space-x-2 p-4">

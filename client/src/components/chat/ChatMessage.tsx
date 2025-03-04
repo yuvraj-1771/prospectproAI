@@ -13,36 +13,95 @@ interface ChatMessageProps {
     sender: "ai" | "user";
     structuredData?: StructuredData;
   };
+  onFilterApply: (query: string) => Promise<void>;
 }
 
-const DataTable: React.FC<{ data: any[] }> = ({ data }) => {
+const DataTable: React.FC<{ data: any[], title?: string }> = ({ data, title }) => {
+  const formatHeader = (header: string) => {
+    return header
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   if (!data || data.length === 0) return null;
 
-  const headers = Object.keys(data[0]);
+  // Get all possible headers from all items
+  const headers = Array.from(new Set(
+    data.flatMap(item => Object.keys(item))
+  )).sort();
+
+  // Ensure consistent data structure
+  const formattedData = data.map(item => {
+    const formattedItem: Record<string, any> = {};
+    headers.forEach(header => {
+      const value = item[header];
+      if (typeof value === 'string') {
+        // Split camelCase/PascalCase into words if it's a single string
+        formattedItem[header] = value.length > 1 ? value : '';
+      } else if (value === undefined || value === null) {
+        formattedItem[header] = '';
+      } else {
+        formattedItem[header] = value;
+      }
+    });
+    return formattedItem;
+  });
 
   return (
-    <div className="overflow-x-auto mt-4">
-      <table className="min-w-full divide-y divide-gray-200">
+    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <table className="min-w-full divide-y divide-gray-200 table-fixed">
+        <colgroup>
+          {headers.map((_, i) => (
+            <col key={i} width={`${100 / headers.length}%`} />
+          ))}
+        </colgroup>
         <thead>
-          <tr>
+          <tr className="bg-gray-50">
             {headers.map((header) => (
               <th
                 key={header}
-                className="px-4 py-2 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider"
               >
-                {header}
+                {formatHeader(header)}
               </th>
             ))}
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {data.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {headers.map((header) => (
-                <td key={header} className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                  {row[header]}
-                </td>
-              ))}
+          {formattedData.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+              {headers.map((header) => {
+                const value = row[header];
+                return (
+                  <td key={header} className="px-4 py-3 text-sm text-gray-900">
+                    {(() => {
+                      if (typeof value === 'number') {
+                        return new Intl.NumberFormat('en-US', { 
+                          style: header.toLowerCase().includes('revenue') ? 'currency' : 'decimal',
+                          currency: 'USD',
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0
+                        }).format(value);
+                      }
+                      
+                      if (typeof value === 'object') {
+                        return JSON.stringify(value);
+                      }
+                      
+                      if (typeof value === 'string') {
+                        if (value.length === 1) return '';
+                        if (header.toLowerCase().includes('year')) {
+                          return new Date(value).getFullYear();
+                        }
+                        return value;
+                      }
+                      
+                      return String(value);
+                    })()} 
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -57,13 +116,14 @@ const countryStateData: Record<string, string[]> = {
   India: ["Maharashtra", "Karnataka", "Delhi", "Tamil Nadu"],
 };
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, onFilterApply }) => {
   const isAi = message.sender === "ai";
 
   // Filter Dropdown State
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string>("");
   const [selectedState, setSelectedState] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleCountryChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const country = event.target.value;
@@ -133,13 +193,27 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
 
                   {/* Apply Filter Button */}
                   <button
-                    className="w-full mt-3 bg-indigo-600 text-white py-1.5 rounded text-sm hover:bg-indigo-700"
-                    onClick={() => {
-                      console.log("Filter Applied:", selectedCountry, selectedState);
-                      setIsFilterOpen(false);
+                    className={`w-full mt-3 py-1.5 rounded text-sm ${isLoading
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                    onClick={async () => {
+                      if (!selectedCountry || !selectedState) return;
+                      
+                      setIsLoading(true);
+                      try {
+                        const filterQuery = `Update the results for ${selectedState}, ${selectedCountry}`;
+                        await onFilterApply(filterQuery);
+                      } catch (error) {
+                        console.error('Error applying filters:', error);
+                      } finally {
+                        setIsLoading(false);
+                        setIsFilterOpen(false);
+                      }
                     }}
+                    disabled={isLoading || !selectedCountry || !selectedState}
                   >
-                    Apply Filters
+                    {isLoading ? 'Applying...' : 'Apply Filters'}
                   </button>
                 </div>
               )}
@@ -162,15 +236,53 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               )}
 
               {message.structuredData.data && (
-                <div>
+                <div className="space-y-6 mt-4">
                   {Object.entries(message.structuredData.data).map(([key, value]) => {
                     if (Array.isArray(value)) {
+                      // Process the data to ensure proper structure
+                      const processedData = value.map(item => {
+                        if (typeof item === 'string') {
+                          // If it's a string, create an object with appropriate fields
+                          const words = item.split(/(?=[A-Z])/); // Split on capital letters
+                          if (key.toLowerCase().includes('sector')) {
+                            return { sector: words.join(' ') };
+                          } else if (key.toLowerCase().includes('startup')) {
+                            return { name: words.join(' ') };
+                          } else if (key.toLowerCase().includes('initiative')) {
+                            return { initiative: words.join(' ') };
+                          } else {
+                            return { name: words.join(' ') };
+                          }
+                        }
+                        return item;
+                      });
+
+                      // Filter out empty or invalid data
+                      const validData = processedData.filter(item => 
+                        Object.values(item).some(val => 
+                          val && typeof val === 'string' && val.length > 1
+                        )
+                      );
+
+                      if (validData.length === 0) return null;
+
                       return (
-                        <div key={key} className="mt-4">
-                          <h4 className="text-sm font-semibold mb-2">
-                            {key.charAt(0).toUpperCase() + key.slice(1)}:
-                          </h4>
-                          <DataTable data={value} />
+                        <div key={key} className="bg-white rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 className="text-sm font-semibold text-gray-700">
+                              {key.split('_').map(word => 
+                                word.charAt(0).toUpperCase() + word.slice(1)
+                              ).join(' ')}
+                            </h4>
+                          </div>
+                          <div className="p-4">
+                            <DataTable 
+                              data={validData} 
+                              title={key.split('_').map(word => 
+                                word.charAt(0).toUpperCase() + word.slice(1)
+                              ).join(' ')} 
+                            />
+                          </div>
                         </div>
                       );
                     }

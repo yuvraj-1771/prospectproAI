@@ -50,7 +50,7 @@ const ChatScreen: React.FC = () => {
     // Try to load conversation history from API
     const loadConversationHistory = async () => {
       try {
-        const history = await chatApi.getConversationHistory();
+        // const history = await chatApi.getConversationHistory();
         if (history && history.length > 0) {
           // Process history if available
           console.log('Loaded conversation history:', history);
@@ -102,12 +102,63 @@ const ChatScreen: React.FC = () => {
       // Send message to API
       const response = await chatApi.sendMessage(content);
       
+      // Handle error response
+      if (response?.error) {
+        const errorMessage: Message = {
+          id: uuidv4(),
+          content: response.error,
+          sender: 'ai'
+        };
+        setConversations(prevConversations => 
+          prevConversations.map(conv => 
+            conv.id === activeConversationId 
+              ? { ...conv, messages: [...conv.messages, errorMessage] } 
+              : conv
+          )
+        );
+        return;
+      }
+
+      // Process the response data
+      const processData = (data: any) => {
+        if (!data) return {};
+        
+        return Object.fromEntries(
+          Object.entries(data).map(([key, value]) => {
+            if (Array.isArray(value)) {
+              // Convert array of strings to array of objects
+              const processedArray = value.map(item => {
+                if (typeof item === 'string') {
+                  // If it's a single word/name, convert to object
+                  return { name: item };
+                } else if (typeof item === 'object' && item !== null) {
+                  // If it's an object, ensure all values are properly formatted
+                  return Object.fromEntries(
+                    Object.entries(item).map(([k, v]) => [
+                      k,
+                      typeof v === 'object' ? JSON.stringify(v) : v
+                    ])
+                  );
+                }
+                return item;
+              });
+              return [key, processedArray];
+            }
+            return [key, value];
+          })
+        );
+      };
+
       // Create AI response message
       const aiMessage: Message = {
         id: uuidv4(),
-        content: response.data.summary,
+        content: response.data?.summary || "I'm sorry, I couldn't process that request.",
         sender: 'ai',
-        structuredData: response.data
+        structuredData: {
+          summary: response.data?.summary || '',
+          key_insights: response.data?.key_insights || [],
+          data: processData(response.data?.data)
+        }
       };
       
       // Update conversation with AI response
@@ -214,7 +265,42 @@ const ChatScreen: React.FC = () => {
                 onExportChat={handleExportChat}
               />
               <ChatContainer
-                messages={activeConversation.messages}
+                messages={activeConversation.messages.map(msg => ({
+                  ...msg,
+                  onFilterApply: async (filterQuery: string) => {
+                    setIsLoading(true);
+                    try {
+                      const response = await chatApi.sendMessage(filterQuery);
+                      
+                      // Update the current conversation with the new filtered results
+                      setConversations(prevConversations =>
+                        prevConversations.map(conv =>
+                          conv.id === activeConversationId
+                            ? {
+                                ...conv,
+                                messages: conv.messages.map(m =>
+                                  m.id === msg.id
+                                    ? {
+                                        ...m,
+                                        structuredData: {
+                                          summary: response.data?.summary || '',
+                                          key_insights: response.data?.key_insights || [],
+                                          data: response.data?.data || {}
+                                        }
+                                      }
+                                    : m
+                                )
+                              }
+                            : conv
+                        )
+                      );
+                    } catch (error) {
+                      console.error('Error updating filters:', error);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }
+                }))}
                 isLoading={isLoading}
               />
               <div className="relative">

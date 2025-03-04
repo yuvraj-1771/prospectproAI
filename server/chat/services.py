@@ -65,6 +65,21 @@ class GroqService:
             # Parse JSON response
             try:
                 data = json.loads(response_text)
+                
+                # Format arrays into proper structures
+                if 'data' in data:
+                    for key, value in data['data'].items():
+                        if isinstance(value, list):
+                            # Ensure each item in the list is a complete object
+                            formatted_list = []
+                            for item in value:
+                                if isinstance(item, str):
+                                    # If it's a string, try to parse it as a complete word
+                                    formatted_list.append({'name': item})
+                                elif isinstance(item, dict):
+                                    formatted_list.append(item)
+                            data['data'][key] = formatted_list
+                
                 return {
                     'status': 'success',
                     'data': data

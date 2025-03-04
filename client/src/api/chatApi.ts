@@ -4,13 +4,12 @@ const API_BASE_URL = 'http://localhost:8000/api';
 
 // Types
 export interface ChatResponse {
-    status: 'success' | 'error';
-    data?: {
-        summary: string;
-        key_insights: string[];
-        data: Record<string, any>;
-    };
+    summary: string;
+    key_insights: string[];
+    data: Record<string, any>;
     message?: string;
+    status?: 'success' | 'error';
+    error?: string;
 }
 
 export interface ChatError {
@@ -27,7 +26,7 @@ const handleApiError = (error: AxiosError): never => {
 
     if (error.response) {
         // Server responded with an error
-        chatError.message = error.response.data.message || 'Server error';
+        // chatError.message = error.response.data.message || 'Server error';
     } else if (error.request) {
         // Request was made but no response
         chatError.message = 'No response from server';
