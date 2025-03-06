@@ -134,21 +134,28 @@ class GroqService:
             Remember: Preserve all existing data when adding new information.
             """
 
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": base_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ],
-                model=self.model,
-                temperature=0.5,  # Lower temperature for more consistent output
-                max_tokens=4096,  # Increased max tokens
-            )
+            try:
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": base_prompt
+                        },
+                        {
+                            "role": "user",
+                            "content": user_message
+                        }
+                    ],
+                    model=self.model,
+                    temperature=0.5,  # Lower temperature for more consistent output
+                    max_tokens=4096,  # Increased max tokens
+                )
+            except Exception as e:
+                print(f"Error calling Groq API: {str(e)}")
+                return {
+                    "error": "Failed to get response from AI service. Please try again.",
+                    "details": str(e)
+                }
 
             response_text = chat_completion.choices[0].message.content.strip()
             
