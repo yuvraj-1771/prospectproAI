@@ -377,7 +377,7 @@ const ChatScreen: React.FC = () => {
             activeConversation={activeConversationId}
             onSelectConversation={handleSelectConversation}
             onNewConversation={handleNewConversation}
-  
+            onDeleteConversation={handleDeleteConversation}
           />
         </div>
         

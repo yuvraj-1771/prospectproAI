@@ -20,40 +20,27 @@ class GroqService:
 
     def extract_relevant_fields(self, message):
         """Extract relevant fields from the user message"""
-        # Common fields to look for in the message
-        fields = {
-            'company': ['company', 'startup', 'business', 'organization'],
-            'location': ['location', 'based in', 'from', 'in'],
-            'funding': ['funding', 'raised', 'investment'],
-            'investors': ['investors', 'backed by', 'invested by'],
-            'industry': ['industry', 'sector', 'field'],
-            'year': ['year', 'established', 'founded'],
-            'stage': ['stage', 'series']
+        # Field mappings with their keywords and corresponding column names
+        field_mappings = {
+            'company_name': ['company', 'startup', 'business', 'organization', 'companies'],
+            'location': ['location', 'based in', 'from', 'in', 'where'],
+            'funding_amount': ['funding', 'raised', 'investment', 'money'],
+            'investors': ['investors', 'backed by', 'invested by', 'VC', 'VCs', 'venture capital'],
+            'industry': ['industry', 'sector', 'field', 'domain'],
+            'established_year': ['year', 'established', 'founded', 'started'],
+            'funding_stage': ['stage', 'series', 'round']
         }
         
-        relevant_fields = set()
         message = message.lower()
+        relevant_fields = set()
         
-        # Add 'company_name' by default as it's always needed for context
+        # Always include company_name as it's needed for context
         relevant_fields.add('company_name')
         
-        # Check each field type
-        for field, keywords in fields.items():
+        # Check each field mapping against the message
+        for field_name, keywords in field_mappings.items():
             if any(keyword in message for keyword in keywords):
-                if field == 'company':
-                    continue  # company_name already added
-                elif field == 'location':
-                    relevant_fields.add('location')
-                elif field == 'funding':
-                    relevant_fields.add('funding_amount')
-                elif field == 'investors':
-                    relevant_fields.add('investors')
-                elif field == 'industry':
-                    relevant_fields.add('industry')
-                elif field == 'year':
-                    relevant_fields.add('established_year')
-                elif field == 'stage':
-                    relevant_fields.add('funding_stage')
+                relevant_fields.add(field_name)
         
         return relevant_fields
 
@@ -84,15 +71,38 @@ class GroqService:
             custom_column = extract_custom_column(user_message)
             location = extract_location_query(user_message)
             
-            # Handle the case where custom_column is None
+            # Extract relevant fields from the user message
+            relevant_fields = self.extract_relevant_fields(user_message)
+            
+            # Always include essential fields
+            essential_fields = {'company_name', 'location', 'investors'}
+            relevant_fields.update(essential_fields)
+            
+            # Add custom column if specified
             custom_column_str = ''
             if custom_column:
                 custom_column_str = f',\n                            "{custom_column["name"]}": "{custom_column["content"]}"'
+                relevant_fields.add(custom_column["name"])
+            
+            # Extract the actual field name from the filter
+            clean_fields = [field.replace('while preserving existing data', '').strip() for field in relevant_fields]
             
             base_prompt = f"""
             You are a highly knowledgeable AI assistant specializing in venture capital and startups.
             {f'Find startups in {location}' if location else 'List notable startups'}
-
+            
+            ### INSTRUCTIONS:
+            1. Keep ALL existing data from the previous response
+            2. For these companies, research and provide accurate data for: {', '.join(clean_fields)}
+            3. For each field, provide SPECIFIC numerical or factual data:
+               - For team size: Provide the actual number of employees
+               - For funding: Provide the amount raised
+               - For investors: List key investors
+               - For revenue: Provide annual revenue figures
+            4. Do not remove or modify existing fields
+            5. Do not add any metadata or descriptive fields
+            6. IMPORTANT: Return ONLY valid JSON with actual researched data
+            
             ### RESPONSE FORMAT (STRICT JSON):
             {{
                 "summary": "Brief overview of the startups",
@@ -143,6 +153,14 @@ class GroqService:
             response_text = chat_completion.choices[0].message.content.strip()
             
             # Clean up the response text
+            response_text = response_text.replace('\_', '_')  # Fix escaped underscores
+            response_text = response_text.replace('\\n', ' ')  # Replace escaped newlines with space
+            response_text = response_text.replace('\n', ' ')   # Replace actual newlines with space
+            response_text = response_text.replace('\"', '"')  # Fix escaped quotes
+            response_text = response_text.replace('\\', '')    # Remove remaining backslashes
+            response_text = response_text.replace('```json', '').replace('```', '')  # Remove markdown
+            
+            # Clean up the response text
             response_text = response_text.replace('\\_', '_')  # Fix escaped underscores
             response_text = response_text.replace('\\n', '\n')  # Fix escaped newlines
             response_text = response_text.replace('\n', ' ')    # Replace actual newlines with spaces
@@ -155,8 +173,16 @@ class GroqService:
             # Extract relevant fields from the user message
             relevant_fields = self.extract_relevant_fields(user_message)
             
-            # Parse JSON response
+            # Clean and parse JSON response
             try:
+                # Remove any text before the first '{' and after the last '}'
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}')
+                if start_idx != -1 and end_idx != -1:
+                    response_text = response_text[start_idx:end_idx + 1].strip()
+                    # Clean up any escaped characters and normalize whitespace
+                    response_text = ' '.join(response_text.split())
+                
                 data = json.loads(response_text)
                 
                 # Format arrays into proper structures
@@ -184,15 +210,34 @@ class GroqService:
                                     # Convert key to a clean format
                                     clean_key = field_key.lower().replace(' ', '_')
                                     
-                                    # Only include relevant fields
-                                    if clean_key in relevant_fields:
-                                        # Format the value
-                                        if isinstance(field_value, (list, dict)):
-                                            cleaned_data[clean_key] = ', '.join(str(v) for v in (field_value if isinstance(field_value, list) else field_value.values()))
-                                        elif field_value is None:
-                                            cleaned_data[clean_key] = ''
+                                    # Format the value
+                                    def format_value(val):
+                                        if isinstance(val, (list, dict)):
+                                            return ', '.join(str(v) for v in (val if isinstance(val, list) else val.values()))
+                                        elif val is None:
+                                            return ''
                                         else:
-                                            cleaned_data[clean_key] = str(field_value)
+                                            return str(val)
+
+                                    # Clean up field key by removing metadata text
+                                    display_key = field_key
+                                    if 'while preserving existing data' in field_key.lower():
+                                        display_key = field_key.lower().replace('while preserving existing data', '').strip()
+                                    
+                                    # Skip pure metadata fields
+                                    if display_key.lower() in ['table_name', '']:
+                                        continue
+
+                                    # Keep existing data and add new fields
+                                    if field_key in company_data:
+                                        # Keep existing data as is
+                                        cleaned_data[display_key] = format_value(field_value)
+                                    elif clean_key in relevant_fields:
+                                        # For new fields from the filter, use the AI-generated data
+                                        if field_value and not isinstance(field_value, str):
+                                            cleaned_data[display_key] = format_value(field_value)
+                                        elif isinstance(field_value, str) and not field_value.lower().startswith('total strength'):
+                                            cleaned_data[display_key] = field_value
                                 
                                 formatted_list.append(cleaned_data)
                             formatted_data[key] = formatted_list
