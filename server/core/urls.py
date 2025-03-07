@@ -23,6 +23,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/chat/', include('chat.urls')),
+    path('api/', TemplateView.as_view(template_name='api_root.html')),
 ]
 
 # Serve static files in development
@@ -31,5 +32,5 @@ if settings.DEBUG:
         path('__debug__/', include('debug_toolbar.urls')),
     ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
-# Serve React app - this should be the last pattern
-urlpatterns += [re_path(r'^.*$', TemplateView.as_view(template_name='index.html'))]
+# Serve React app for non-API routes
+urlpatterns += [re_path(r'^(?!api/).*$', TemplateView.as_view(template_name='index.html'))]

@@ -25,18 +25,47 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     nginx \
     build-essential \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY server/requirements.txt /app/server/
 RUN pip install --no-cache-dir -r /app/server/requirements.txt
 
+# Create necessary directories
+RUN mkdir -p /app/server/static /app/server/mediafiles /app/server/staticfiles /app/server/data /app/client/dist
+
 # Copy built client files
 COPY --from=client-builder /app/client/dist /app/client/dist
 
 # Copy server files
 COPY --from=server-builder /app/server /app/server
-COPY --from=server-builder /app/server/staticfiles /app/server/staticfiles
+
+# Copy nginx configuration
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+# Set proper permissions and create necessary directories
+RUN mkdir -p /var/log/nginx /var/lib/nginx /run/nginx /etc/nginx/sites-enabled \
+    && rm -f /etc/nginx/sites-enabled/default \
+    && chown -R www-data:www-data /app \
+    && chmod -R 755 /app \
+    && chmod -R 777 /app/server/data \
+    && chmod -R 755 /app/client/dist \
+    && chown -R www-data:www-data /var/log/nginx \
+    && chown -R www-data:www-data /var/lib/nginx \
+    && chown -R www-data:www-data /run/nginx \
+    && chown -R www-data:www-data /etc/nginx \
+    && touch /var/log/nginx/error.log \
+    && touch /var/log/nginx/access.log \
+    && chown -R www-data:www-data /var/log/nginx \
+    && chmod -R 755 /var/log/nginx \
+    && chmod -R 755 /var/lib/nginx \
+    && chmod -R 755 /run/nginx \
+    && chmod -R 755 /etc/nginx
+
+# Expose ports
+EXPOSE 8000
+EXPOSE 80
 
 # Copy configuration files
 COPY .env /app/.env

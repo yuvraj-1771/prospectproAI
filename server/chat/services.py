@@ -103,7 +103,7 @@ class GroqService:
             5. Do not add any metadata or descriptive fields
             6. IMPORTANT: Return ONLY valid JSON with actual researched data
             
-            ### RESPONSE FORMAT (STRICT JSON):
+            ### RESPONSE FORMAT  (STRICT JSON):
             {{
                 "summary": "Brief overview of the startups",
                 "data": {{
